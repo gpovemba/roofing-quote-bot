@@ -1,0 +1,131 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>Roofing Quote Bot</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com" />
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+  <link rel="stylesheet" href="/static/style.css" />
+</head>
+<body>
+
+  <div class="mobile-overlay" id="mobileOverlay"></div>
+
+  <div class="layout">
+    <aside class="sidebar" id="sidebar">
+      <div class="brand">
+        <span class="brand-icon">🏠</span>
+        <span class="brand-name">Quote Bot</span>
+        <button class="btn-sidebar-close" id="sidebarCloseBtn" aria-label="Close">✕</button>
+      </div>
+
+      <button class="btn-new" id="newChatBtn">+ New Quote</button>
+      <button class="btn-folder" id="folderBtn">
+        <svg width="14" height="14" viewBox="0 0 14 14" fill="none"><path d="M1 3.5A1.5 1.5 0 012.5 2H5l1.5 2H11.5A1.5 1.5 0 0113 5.5v5A1.5 1.5 0 0111.5 12h-9A1.5 1.5 0 011 10.5v-7z" stroke="currentColor" stroke-width="1.3" stroke-linejoin="round"/></svg>
+        Previous Quotes
+      </button>
+
+      <div class="sidebar-section-label" id="inProgressLabel" style="display:none">In Progress</div>
+      <ul class="quote-list" id="inProgressList"></ul>
+      <div class="sidebar-section-label">Saved Quotes</div>
+      <ul class="quote-list" id="quoteList"></ul>
+
+      <div class="sidebar-footer">
+        <div class="sidebar-stat">
+          <span class="sidebar-stat-val" id="statCount">—</span>
+          <span class="sidebar-stat-label">Quotes</span>
+        </div>
+        <div class="sidebar-stat-divider"></div>
+        <div class="sidebar-stat">
+          <span class="sidebar-stat-val" id="statValue">—</span>
+          <span class="sidebar-stat-label">Total Value</span>
+        </div>
+      </div>
+    </aside>
+
+    <main class="main">
+      <div class="mobile-topbar">
+        <button class="btn-hamburger" id="hamburgerBtn" aria-label="Open menu">
+          <svg width="18" height="18" viewBox="0 0 18 18" fill="none">
+            <path d="M2 4h14M2 9h14M2 14h14" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"/>
+          </svg>
+        </button>
+        <span class="mobile-brand">Quote Bot</span>
+        <button class="btn-new-mobile" id="newChatMobileBtn">+</button>
+      </div>
+
+      <!-- Chat view -->
+      <div class="chat-wrap" id="chatView">
+        <div class="messages" id="messages">
+          <div class="welcome-state" id="welcomeState">
+            <div class="welcome-icon">🏠</div>
+            <h2 class="welcome-title">Roofing Quote Bot</h2>
+            <p class="welcome-sub">Generate accurate estimates in seconds. Enter a property address and I'll pull the roof measurements automatically via EagleView.</p>
+            <div class="welcome-chips">
+              <button class="welcome-chip">42 Maple Ave, Austin TX</button>
+              <button class="welcome-chip">3,200 sqft metal roof, steep pitch</button>
+              <button class="welcome-chip">Asphalt replacement, 2 layers to remove</button>
+            </div>
+          </div>
+        </div>
+        <div class="input-bar">
+          <textarea id="userInput" placeholder="Enter an address or describe the job…" rows="1" autofocus></textarea>
+          <button id="sendBtn" aria-label="Send">
+            <svg viewBox="0 0 24 24" xmlns="http://www.w3.org/2000/svg"><path d="M2.01 21L23 12 2.01 3 2 10l15 2-15 2z"/></svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Quote detail view -->
+      <div class="quote-detail-view" id="quoteDetailView" style="display:none;">
+        <div class="detail-header">
+          <div class="detail-header-left">
+            <button class="btn-back" id="backToChatBtn">← Back to Chat</button>
+            <div class="detail-title" id="detailTitle"></div>
+            <div class="detail-meta" id="detailMeta"></div>
+          </div>
+          <button class="btn-delete-detail" id="deleteDetailBtn" title="Delete quote">
+            <svg width="15" height="15" viewBox="0 0 13 13" fill="none">
+              <path d="M2 3.5h9M5 3.5V2.5h3v1M5.5 6v4M7.5 6v4M3 3.5l.7 7h5.6l.7-7" stroke="currentColor" stroke-width="1.3" stroke-linecap="round" stroke-linejoin="round"/>
+            </svg>
+            Delete
+          </button>
+        </div>
+        <div class="detail-body" id="detailBody"></div>
+      </div>
+
+      <!-- Quotes folder view -->
+      <div class="folder-view" id="quotesFolderView" style="display:none;">
+        <div class="folder-header">
+          <div class="folder-header-left">
+            <button class="btn-back" id="backFromFolderBtn">← Back to Chat</button>
+            <h1 class="folder-title">All Quotes <span class="folder-count" id="folderCount"></span></h1>
+          </div>
+          <input class="folder-search" id="folderSearch" type="search" placeholder="Search by name or address…" />
+        </div>
+        <div class="folder-body">
+          <div class="folder-grid" id="folderGrid"></div>
+        </div>
+      </div>
+    </main>
+  </div>
+
+  <!-- Delete modal -->
+  <div class="modal-overlay" id="deleteModal" hidden>
+    <div class="modal">
+      <div class="modal-title">Delete Quote</div>
+      <div class="modal-body">Are you sure you want to delete this quote? This cannot be undone.</div>
+      <div class="modal-actions">
+        <button class="btn-modal-cancel" id="modalCancelBtn">Cancel</button>
+        <button class="btn-modal-confirm" id="modalConfirmBtn">Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast -->
+  <div class="toast" id="toast" aria-live="polite"></div>
+
+  <script src="/static/app.js"></script>
+</body>
+</html>

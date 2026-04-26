@@ -1,0 +1,15 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+.env
+venv/
+.venv/
+env/
+
+# Database (contains real quote data — exclude from repo)
+quotes.db
+
+# OS
+.DS_Store
+Thumbs.db
