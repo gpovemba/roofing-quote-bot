@@ -1,0 +1,348 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>Roofing Quote Bot — Demo</title>
+<style>
+  /* Palette lifted from the real app (static/style.css) so the demo matches. */
+  :root{
+    --bg:#09090e; --surface:#101017; --surface2:#17171f; --surface3:#1e1e28;
+    --border:rgba(255,255,255,.06); --border2:rgba(255,255,255,.10);
+    --text:#eeeef5; --text2:#9494ac; --muted:#52526a;
+    --accent:#e8621a; --grad:linear-gradient(135deg,#e8621a 0%,#b84a12 100%);
+    --green:#3ecf8e; --green-dim:rgba(62,207,142,.10);
+    --blue:#4a9eff; --blue-dim:rgba(74,158,255,.08);
+    --yellow:#f5a623; --red:#ff5555;
+    --radius:12px; --radius-sm:7px; --shadow:0 2px 16px rgba(0,0,0,.5);
+    --font:'Inter',system-ui,sans-serif;
+  }
+  *,*::before,*::after{box-sizing:border-box;margin:0;padding:0}
+  html,body{height:100%;background:var(--bg);color:var(--text);font:14px/1.5 var(--font);-webkit-font-smoothing:antialiased}
+  .stage{display:flex;flex-direction:column;height:100vh;overflow:hidden}
+
+  /* ── Top title bar ── */
+  .titlebar{display:flex;align-items:center;gap:14px;padding:14px 22px;background:var(--surface);border-bottom:1px solid var(--border)}
+  .titlebar .logo{width:30px;height:30px;border-radius:8px;background:var(--grad);display:grid;place-items:center;font-size:16px}
+  .titlebar h1{font-size:15px;font-weight:700;letter-spacing:-.01em}
+  .titlebar .tag{font-size:11px;color:var(--text2);font-weight:500}
+  .titlebar .wt{margin-left:auto;font-size:10px;color:var(--muted);border:1px solid var(--border2);padding:3px 9px;border-radius:100px}
+
+  /* ── App mock ── */
+  .app{flex:1;display:flex;overflow:hidden}
+  .sidebar{width:200px;background:var(--surface);border-right:1px solid var(--border);padding:16px 14px;display:flex;flex-direction:column;gap:12px;flex-shrink:0}
+  .brand{display:flex;align-items:center;gap:8px;font-weight:700;font-size:14px}
+  .brand .ico{font-size:18px}
+  .btn-new{background:var(--grad);color:#fff;border:none;border-radius:var(--radius-sm);padding:9px;font-weight:600;font-size:12px;font-family:var(--font)}
+  .side-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);margin-top:6px}
+  .qrow{font-size:12px;color:var(--text2);padding:8px 10px;border-radius:7px;background:var(--surface2);border:1px solid var(--border);opacity:0;transition:opacity .4s}
+  .qrow.show{opacity:1}
+  .qrow b{color:var(--text);display:block;font-size:12px}
+  .side-foot{margin-top:auto;display:flex;gap:10px;border-top:1px solid var(--border);padding-top:12px}
+  .stat{flex:1}.stat .v{font-size:16px;font-weight:700}.stat .l{font-size:9px;color:var(--muted);text-transform:uppercase;letter-spacing:.08em}
+
+  .chat{flex:1;display:flex;flex-direction:column;overflow:hidden;position:relative}
+  .messages{flex:1;overflow-y:auto;padding:26px 18% 26px 8%;display:flex;flex-direction:column;gap:18px;scroll-behavior:smooth}
+  @media(max-width:1100px){.messages{padding:26px 6%}}
+  .msg{display:flex;flex-direction:column;gap:5px;max-width:680px;animation:rise .45s ease both}
+  .msg.user{align-self:flex-end;align-items:flex-end}
+  @keyframes rise{from{opacity:0;transform:translateY(14px)}to{opacity:1;transform:none}}
+  .msg-lbl{font-size:10px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted);font-weight:700}
+  .bubble{padding:13px 16px;border-radius:13px;font-size:13.5px;white-space:pre-wrap}
+  .msg.user .bubble{background:var(--grad);color:#fff;border-bottom-right-radius:4px}
+  .msg.bot .bubble{background:var(--surface2);border:1px solid var(--border);border-bottom-left-radius:4px}
+  .bubble strong{color:#fff}
+  .typing{display:inline-flex;gap:4px;padding:14px 16px}
+  .typing i{width:6px;height:6px;border-radius:50%;background:var(--text2);animation:blink 1.2s infinite}
+  .typing i:nth-child(2){animation-delay:.2s}.typing i:nth-child(3){animation-delay:.4s}
+  @keyframes blink{0%,60%,100%{opacity:.25}30%{opacity:1}}
+
+  /* measurement card — mirrors renderMeasurementCard() */
+  .mcard{background:var(--surface);border:1px solid var(--border);border-top:2px solid var(--blue);border-radius:var(--radius);overflow:hidden;box-shadow:var(--shadow);max-width:520px;animation:rise .5s ease both}
+  .mcard.pre{border-top-color:var(--yellow)}
+  .m-head{padding:14px 18px;display:flex;justify-content:space-between;align-items:flex-start;background:var(--blue-dim);border-bottom:1px solid var(--border)}
+  .mcard.pre .m-head{background:rgba(245,166,35,.08)}
+  .m-prov-row{display:flex;align-items:center;gap:8px;flex-wrap:wrap}
+  .m-prov{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.12em;color:var(--blue)}
+  .mcard.pre .m-prov{color:var(--yellow)}
+  .m-conf{font-size:9px;font-weight:700;text-transform:uppercase;letter-spacing:.1em;padding:2px 7px;border-radius:100px}
+  .m-conf.pre{color:var(--yellow);background:rgba(245,166,35,.10);border:1px solid rgba(245,166,35,.25)}
+  .m-conf.con{color:var(--green);background:var(--green-dim);border:1px solid rgba(62,207,142,.25)}
+  .m-addr{font-size:13px;font-weight:600;margin-top:3px}
+  .m-status{font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:.07em;padding:3px 10px;border-radius:100px;background:var(--green-dim);color:var(--green)}
+  .m-body{padding:12px 18px;display:grid;grid-template-columns:1fr 1fr;gap:9px 22px}
+  .m-row{display:flex;justify-content:space-between;font-size:12.5px;border-bottom:1px dashed var(--border);padding-bottom:6px}
+  .m-row span:first-child{color:var(--text2)}
+  .m-foot{padding:12px 18px;border-top:1px solid var(--border)}
+  .btn-up{display:inline-flex;align-items:center;gap:6px;background:var(--grad);color:#fff;border:none;border-radius:var(--radius-sm);padding:8px 14px;font:600 12px var(--font);box-shadow:0 2px 10px rgba(232,98,26,.28)}
+
+  /* quote breakdown */
+  .quote{background:var(--surface);border:1px solid var(--border);border-radius:var(--radius);overflow:hidden;max-width:520px;animation:rise .5s ease both}
+  .q-top{padding:16px 18px;background:var(--grad);color:#fff}
+  .q-top .lbl{font-size:10px;text-transform:uppercase;letter-spacing:.12em;opacity:.85}
+  .q-top .amt{font-size:30px;font-weight:800;letter-spacing:-.02em}
+  .q-lines{padding:8px 18px 14px}
+  .q-line{display:flex;justify-content:space-between;font-size:13px;padding:7px 0;border-bottom:1px dashed var(--border)}
+  .q-line:last-child{border:none;font-weight:700;color:var(--text)}
+  .q-line span:first-child{color:var(--text2)}
+
+  /* ── Caption / narration bar ── */
+  .caption{background:var(--surface);border-top:1px solid var(--border);padding:16px 22px;display:flex;align-items:center;gap:18px;min-height:78px}
+  .cap-step{font-size:10px;font-weight:700;letter-spacing:.12em;text-transform:uppercase;color:var(--accent);white-space:nowrap}
+  .cap-text{font-size:14px;color:var(--text);flex:1}
+  .cap-text b{color:#fff}
+
+  /* ── Controls ── */
+  .controls{display:flex;align-items:center;gap:10px;padding:12px 22px;background:var(--bg);border-top:1px solid var(--border)}
+  .controls button{background:var(--surface2);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:8px 14px;font:600 12px var(--font);cursor:pointer;transition:.15s}
+  .controls button:hover{border-color:var(--accent);color:#fff}
+  .controls button.primary{background:var(--grad);border:none;color:#fff}
+  .controls .spacer{flex:1}
+  .controls .prog{font-size:11px;color:var(--text2)}
+  .controls select{background:var(--surface2);color:var(--text);border:1px solid var(--border2);border-radius:8px;padding:7px;font:600 12px var(--font)}
+  .bar{height:3px;background:var(--surface3)}
+  .bar i{display:block;height:100%;background:var(--grad);width:0;transition:width .3s}
+
+  /* ── Recording mode (?record) ── */
+  body.rec .controls,body.rec .wt{display:none}
+  body.rec .titlebar{padding:16px 26px}
+  .startgate{position:fixed;inset:0;background:rgba(9,9,14,.97);display:none;
+    flex-direction:column;align-items:center;justify-content:center;gap:18px;z-index:50;text-align:center}
+  body.rec .startgate{display:flex}
+  .startgate h2{font-size:22px;font-weight:800;letter-spacing:-.02em}
+  .startgate p{color:var(--text2);max-width:440px;font-size:13.5px}
+  .startgate .go{background:var(--grad);color:#fff;border:none;border-radius:10px;
+    padding:14px 30px;font:700 15px var(--font);cursor:pointer;box-shadow:0 4px 20px rgba(232,98,26,.4)}
+  .startgate small{color:var(--muted);font-size:11px}
+</style>
+</head>
+<body>
+<div class="stage">
+
+  <div class="titlebar">
+    <div class="logo">🏠</div>
+    <div>
+      <h1>Roofing Quote Bot</h1>
+      <div class="tag">Two-tier estimating: free pre-quote → gated contract-grade report</div>
+    </div>
+    <div class="wt">product name: working title</div>
+  </div>
+
+  <div class="app">
+    <aside class="sidebar">
+      <div class="brand"><span class="ico">🏠</span><span>Quote Bot</span></div>
+      <button class="btn-new">+ New Quote</button>
+      <div class="side-lbl">Saved Quotes</div>
+      <div class="qrow" id="qrow"><b>42 Maple Ave</b>Austin TX · contract</div>
+      <div class="side-foot">
+        <div class="stat"><div class="v" id="statN">0</div><div class="l">Quotes</div></div>
+        <div class="stat"><div class="v" id="statV">$0</div><div class="l">Total Value</div></div>
+      </div>
+    </aside>
+
+    <div class="chat">
+      <div class="messages" id="messages"></div>
+    </div>
+  </div>
+
+  <div class="startgate" id="startgate">
+    <h2>🏠 Roofing Quote Bot — Walkthrough</h2>
+    <p>Start your screen recorder now, then click below. The demo plays start
+       to finish on its own (~90s) and stops on the recap — no further clicks.</p>
+    <button class="go" id="goBtn">▶ Begin recording-safe playback</button>
+    <small>or press the Spacebar</small>
+  </div>
+
+  <div class="bar"><i id="barFill"></i></div>
+
+  <div class="caption">
+    <div class="cap-step" id="capStep">INTRO</div>
+    <div class="cap-text" id="capText">A roofing owner needs a fast, accurate quote — without burning $10 on a paid measurement report for every tire-kicker.</div>
+  </div>
+
+  <div class="controls">
+    <button class="primary" id="playBtn">▶ Play</button>
+    <button id="prevBtn">⏮ Prev</button>
+    <button id="nextBtn">Next ⏭</button>
+    <button id="restartBtn">↺ Restart</button>
+    <div class="spacer"></div>
+    <span class="prog" id="prog">Step 0 / 0</span>
+    <select id="speed">
+      <option value="1.4">0.7×</option>
+      <option value="1" selected>1× speed</option>
+      <option value="0.6">1.6×</option>
+      <option value="0.35">3× speed</option>
+    </select>
+  </div>
+</div>
+
+<script>
+/* ───────────────────────────────────────────────────────────────────────
+   Demo script. Each step renders into the chat + sets the caption.
+   Numbers are the real outputs from the end-to-end test run.
+   ─────────────────────────────────────────────────────────────────────── */
+const M = document.getElementById('messages');
+const esc = s => s.replace(/&/g,'&amp;').replace(/</g,'&lt;');
+const bold = s => esc(s).replace(/\*\*(.+?)\*\*/g,'<strong>$1</strong>');
+
+function user(t){const d=document.createElement('div');d.className='msg user';
+  d.innerHTML=`<div class="msg-lbl">You</div><div class="bubble">${esc(t)}</div>`;M.appendChild(d);scroll();}
+function bot(t){const d=document.createElement('div');d.className='msg bot';
+  d.innerHTML=`<div class="msg-lbl">Quote Bot</div><div class="bubble">${bold(t)}</div>`;M.appendChild(d);scroll();}
+function typing(){const d=document.createElement('div');d.className='msg bot';d.id='typing';
+  d.innerHTML=`<div class="msg-lbl">Quote Bot</div><div class="bubble"><span class="typing"><i></i><i></i><i></i></span></div>`;M.appendChild(d);scroll();}
+function untype(){const t=document.getElementById('typing');if(t)t.remove();}
+function scroll(){requestAnimationFrame(()=>M.scrollTop=M.scrollHeight);}
+
+function preCard(){const d=document.createElement('div');d.className='msg bot';
+  d.innerHTML=`<div class="mcard pre">
+    <div class="m-head"><div><div class="m-prov-row"><span class="m-prov">Google Solar API</span>
+      <span class="m-conf pre">Pre-quote · est.</span></div><div class="m-addr">42 Maple Ave, Austin TX</div></div>
+      <span class="m-status">complete</span></div>
+    <div class="m-body">
+      <div class="m-row"><span>Roof area</span><span>~2,350 sqft</span></div>
+      <div class="m-row"><span>Roof squares</span><span>23.5</span></div>
+      <div class="m-row"><span>Pitch</span><span>3:12 (low)</span></div>
+      <div class="m-row"><span>Facets</span><span>4</span></div>
+      <div class="m-row"><span>Waste factor</span><span>7%</span></div>
+      <div class="m-row"><span>Cost</span><span>≈ free</span></div>
+    </div>
+    <div class="m-foot"><button class="btn-up">★ Pull EagleView report ($10)</button></div>
+  </div>`;M.appendChild(d);scroll();}
+
+function quoteCard(opts){const d=document.createElement('div');d.className='msg bot';
+  d.innerHTML=`<div class="quote">
+    <div class="q-top"><div class="lbl">${opts.lbl}</div><div class="amt">${opts.amt}</div></div>
+    <div class="q-lines">
+      <div class="q-line"><span>Materials</span><span>${opts.mat}</span></div>
+      <div class="q-line"><span>Labor</span><span>${opts.lab}</span></div>
+      <div class="q-line"><span>Tear-off &amp; disposal</span><span>${opts.tear}</span></div>
+      <div class="q-line"><span>Overhead (15%)</span><span>${opts.oh}</span></div>
+      <div class="q-line"><span>Profit (margin ${opts.pm})</span><span>${opts.profit}</span></div>
+      <div class="q-line"><span>${opts.totLbl}</span><span>${opts.tot}</span></div>
+    </div></div>`;M.appendChild(d);scroll();}
+
+function contractCard(){const d=document.createElement('div');d.className='msg bot';
+  d.innerHTML=`<div class="mcard">
+    <div class="m-head"><div><div class="m-prov-row"><span class="m-prov">EagleView</span>
+      <span class="m-conf con">Contract-grade</span></div><div class="m-addr">42 Maple Ave, Austin TX</div></div>
+      <span class="m-status">complete</span></div>
+    <div class="m-body">
+      <div class="m-row"><span>Roof area</span><span>2,180 sqft</span></div>
+      <div class="m-row"><span>Roof squares</span><span>21.8</span></div>
+      <div class="m-row"><span>Pitch</span><span>7:12 (steep)</span></div>
+      <div class="m-row"><span>Ridge</span><span>48 ft</span></div>
+      <div class="m-row"><span>Valley</span><span>22 ft</span></div>
+      <div class="m-row"><span>Waste factor</span><span>15%</span></div>
+    </div></div>`;M.appendChild(d);scroll();}
+
+function stat(n,v){document.getElementById('statN').textContent=n;document.getElementById('statV').textContent=v;}
+
+/* steps: {step,cap,run} */
+const STEPS=[
+ {step:'INTRO',
+  cap:'The problem: roofing owners need fast quotes, but a paid EagleView measurement costs <b>~$10 every time</b> — too expensive to run on every lead.',
+  run:()=>{}},
+
+ {step:'1 · ADDRESS',
+  cap:'The owner just pastes a property address and the job basics. No manual roof measuring.',
+  run:()=>user('Quote for 42 Maple Ave, Austin TX. Asphalt shingle, standard grade, 1 layer tear-off.')},
+
+ {step:'2 · FREE PRE-QUOTE',
+  cap:'Tier 1 fires automatically: a <b>free</b> Google Solar API lookup returns ballpark roof area &amp; pitch — <b>no $10 spent</b>.',
+  run:()=>{typing();}},
+
+ {step:'2 · FREE PRE-QUOTE',
+  cap:'Estimated roof: ~2,350 sqft, 3:12 pitch — clearly labelled <b>Pre-quote · est.</b> (yellow card = not contract-grade).',
+  run:()=>{untype();preCard();}},
+
+ {step:'3 · QUOTE RANGE',
+  cap:'The pricing engine runs and returns a <b>±15% range</b>, never a false-precision single number from estimated measurements.',
+  run:()=>{bot("**PRE-QUOTE — 42 Maple Ave, Austin TX**\n\n**Range: $6,600 – $8,900**  (±15% on $7,731)\n\n⚠ Estimate only — Google Solar measurements, not verified for contract use.");
+    quoteCard({lbl:'PRE-QUOTE (estimate) · midpoint',amt:'$7,731',mat:'$3,017',lab:'$1,763',tear:'$823',oh:'$840',pm:'16.7%',profit:'$1,289',totLbl:'Final quote (midpoint)',tot:'$7,731'});}},
+
+ {step:'4 · QUALIFY',
+  cap:'Instead of spending money, the bot <b>qualifies the lead first</b> — timeline, budget, decision-maker.',
+  run:()=>bot("Before I pull a paid report, a few qualifying questions:\n1. Confirmed lead — is this the homeowner / decision-maker?\n2. Timeline?\n3. Does the $6.6K–$8.9K range fit their budget?")},
+
+ {step:'5 · THE GATE',
+  cap:'A vague reply is <b>not</b> treated as consent. Cost discipline is enforced in the system prompt.',
+  run:()=>user('Looks like a decent lead, they seem interested. What now?')},
+
+ {step:'5 · THE GATE',
+  cap:'The bot holds the line — <b>no $10 charge</b> on an unqualified maybe. This is the core safeguard.',
+  run:()=>bot("Good — but before I spend the $10: what's their timeline, and does the pre-quote range work against their budget? Once that's confirmed I'll ask for the go-ahead.")},
+
+ {step:'6 · CONFIRMATION',
+  cap:'Lead qualifies. The owner gives <b>explicit confirmation</b> — the only thing that unlocks the paid call.',
+  run:()=>user('Confirmed homeowner, 2-week timeline, budget works. Yes, pull the EagleView report ($10).')},
+
+ {step:'7 · CONTRACT REPORT',
+  cap:'Tier 2 fires only now: a real <b>EagleView</b> report — precise area, pitch, ridge/valley lengths.',
+  run:()=>{typing();}},
+
+ {step:'7 · CONTRACT REPORT',
+  cap:'Green <b>Contract-grade</b> card. Note it corrected the estimate: 2,180 sqft / 7:12 — steeper and tighter than Solar guessed.',
+  run:()=>{untype();contractCard();}},
+
+ {step:'8 · FINAL QUOTE',
+  cap:'Re-priced on verified measurements: a single, defensible <b>contract-grade number</b> — saved to history.',
+  run:()=>{bot("**CONTRACT-GRADE QUOTE — 42 Maple Ave**\n\n**$10,578** — verified EagleView measurements. Steeper 7:12 pitch raised labor vs. the estimate. Saved to your quotes.");
+    quoteCard({lbl:'CONTRACT-GRADE · final',amt:'$10,578',mat:'$3,140',lab:'$2,420',tear:'$1,068',oh:'$1,142',pm:'16.7%',profit:'$1,763',totLbl:'Final quote',tot:'$10,578'});
+    document.getElementById('qrow').classList.add('show');stat(1,'$10.6K');}},
+
+ {step:'RECAP',
+  cap:'<b>Free pre-quote on every lead. $10 spent only on qualified, confirmed jobs.</b> Faster quotes, protected margins, zero wasted spend.',
+  run:()=>{}},
+];
+
+/* ── Engine ── */
+let i=-1,playing=false,timer=null;
+const capStep=document.getElementById('capStep'),capText=document.getElementById('capText'),
+      prog=document.getElementById('prog'),bar=document.getElementById('barFill'),
+      playBtn=document.getElementById('playBtn'),speedSel=document.getElementById('speed');
+
+function render(n){
+  M.innerHTML='';document.getElementById('qrow').classList.remove('show');stat(0,'$0');
+  // Replay 0..n. typing()/untype() pairs across steps cancel out; a typing()
+  // on the *final* step n is intentionally left visible (the "thinking" beat).
+  for(let k=0;k<=n;k++){const s=STEPS[k];if(k===n){capStep.textContent=s.step;capText.innerHTML=s.cap;}s.run();}
+  prog.textContent=`Step ${n+1} / ${STEPS.length}`;
+  bar.style.width=((n+1)/STEPS.length*100)+'%';
+}
+function go(n){if(n<0||n>=STEPS.length)return;i=n;render(i);}
+function next(){if(i<STEPS.length-1){go(i+1);return true;}return false;}
+function prev(){if(i>0)go(i-1);}
+function stop(){playing=false;clearTimeout(timer);playBtn.textContent='▶ Play';}
+function play(){
+  if(i>=STEPS.length-1)go(0);
+  playing=true;playBtn.textContent='⏸ Pause';
+  const tick=()=>{if(!playing)return;
+    if(!next()){stop();return;}
+    const base=STEPS[i].step.includes('PRE-QUOTE')||STEPS[i].step.includes('REPORT')?2600:4200;
+    timer=setTimeout(tick, base*parseFloat(speedSel.value));};
+  const base=STEPS[i].step.includes('PRE-QUOTE')?2600:4200;
+  timer=setTimeout(tick, base*parseFloat(speedSel.value));
+}
+playBtn.onclick=()=>playing?stop():play();
+document.getElementById('nextBtn').onclick=()=>{stop();next();};
+document.getElementById('prevBtn').onclick=()=>{stop();prev();};
+document.getElementById('restartBtn').onclick=()=>{stop();go(0);};
+go(0);
+
+/* ── Recording mode: open demo.html?record  (add &fast for ~60s) ── */
+(function(){
+  const q=new URLSearchParams(location.search);
+  if(!q.has('record'))return;
+  document.body.classList.add('rec');
+  if(q.has('fast'))speedSel.value='0.6';           // 1.6× → ~60s run
+  const gate=document.getElementById('startgate');
+  function begin(){gate.style.display='none';go(0);play();}
+  document.getElementById('goBtn').onclick=begin;
+  document.addEventListener('keydown',e=>{
+    if(e.code==='Space'&&gate.style.display!=='none'){e.preventDefault();begin();}
+  },{once:false});
+})();
+</script>
+</body>
+</html>

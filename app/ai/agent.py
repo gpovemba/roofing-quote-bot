@@ -3,9 +3,11 @@ import json
 import anthropic
 from app.models import ChatMessage, JobInputs, Quote, MeasurementSummary
 from app.business.calculator import calculate
-from app.history.store import save_quote_direct, get_similar_quotes
+from app.history.store import save_quote_direct, get_similar_quotes, update_quote_notes
+from app.knowledge.store import search as search_documents, titles_for_agent
 from app.measurement.eagleview import get_provider
 from app.measurement.store import save_measurement, get_measurement, update_measurement_complete
+from app.business.profile import get_profile, profile_summary_for_agent
 
 client = anthropic.Anthropic(api_key=os.environ["ANTHROPIC_API_KEY"])
 
@@ -23,22 +25,45 @@ Measurement flow:
 - If status is still pending, tell the user and gather remaining business inputs.
 - If status is complete, proceed with the measurement data to calculate_quote.
 
-After complete measurements, ask only for what EagleView cannot provide:
+After complete measurements, ask only for what is specific to this job:
   - Roof type / material (asphalt, metal, tile, flat)
-  - Material grade (economy, standard, premium)
+  - Material grade (economy, standard, premium). Mention the owner's actual
+    product for each grade from the business profile below.
   - Number of existing layers to tear off
-  - Any known costs: disposal, transport, permit, equipment
-  - Desired markup / overhead if different from defaults
 
-Then call calculate_quote. Quotes are saved automatically.
+Do NOT ask for material prices, labor rates, disposal, delivery, permit fees,
+overhead, or markup. Those come from the owner's business profile and are
+applied automatically. Only pass one of those overrides to calculate_quote if
+the user volunteers a job-specific number (e.g. "permit is $400 on this one").
+
+Then call calculate_quote. Quotes are saved automatically. Summarize the result
+briefly: the final price, the main product, and any line items flagged as
+estimated (roof edges estimated from area, not measured).
 
 If no address is available, fall back to asking for roof size and pitch manually.
+
+Company documents (warranties, supplier catalogs, policies, installation specs):
+- When the user asks about warranties, products, what's included, extra charges,
+  payment terms, or installation requirements, call search_documents and answer
+  ONLY from what it returns. Name the document you used, e.g. "(Workmanship Warranty)".
+- If the search returns nothing relevant, say the documents don't cover it. Never
+  invent warranty terms, prices for extras, or policies.
+- Prices for the quote itself always come from calculate_quote, never from documents.
+
+After every calculate_quote, automatically:
+  1. Call search_documents for the warranty that applies, what the job includes,
+     and any likely extra charges (for example decking replacement on older roofs).
+  2. Call save_quote_notes with 2 to 5 short, customer-facing notes built only from
+     those results. Write them for the homeowner, in plain language, with no internal
+     costs, overhead, or markup. Skip this step if no documents are uploaded.
 
 Tools:
 - request_roof_measurements: Trigger EagleView for a property address.
 - get_measurement_status: Poll a pending measurement by measurement_id.
 - calculate_quote: Run the pricing engine. Pass measurement_id when available.
 - get_similar_quotes: Look up past jobs for pricing context.
+- search_documents: Search the company's uploaded documents.
+- save_quote_notes: Attach customer-facing notes to a saved quote.
 
 Keep responses concise and professional. Always state the final quote amount prominently.
 """
@@ -109,15 +134,15 @@ TOOLS = [
                 "layers_to_remove": {"type": "integer"},
                 "waste_factor": {
                     "type": "number",
-                    "description": "Override the EagleView waste factor if needed.",
+                    "description": "Override only if the user gives a job-specific waste factor.",
                 },
-                "labor_rate_per_square": {"type": "number"},
-                "disposal_cost": {"type": "number"},
-                "transport_cost": {"type": "number"},
-                "permit_cost": {"type": "number"},
-                "equipment_cost": {"type": "number"},
-                "overhead_pct": {"type": "number"},
-                "markup_pct": {"type": "number"},
+                "labor_rate_per_square": {"type": "number", "description": "Job-specific override only."},
+                "disposal_cost": {"type": "number", "description": "Job-specific override only."},
+                "transport_cost": {"type": "number", "description": "Job-specific override only."},
+                "permit_cost": {"type": "number", "description": "Job-specific override only."},
+                "equipment_cost": {"type": "number", "description": "Job-specific override only."},
+                "overhead_pct": {"type": "number", "description": "Job-specific override only, as a decimal."},
+                "markup_pct": {"type": "number", "description": "Job-specific override only, as a decimal."},
                 "customer_name": {"type": "string"},
                 "property_address": {"type": "string"},
             },
@@ -134,6 +159,41 @@ TOOLS = [
                 "area_sqft": {"type": "number"},
             },
             "required": ["roof_type", "area_sqft"],
+        },
+    },
+    {
+        "name": "search_documents",
+        "description": (
+            "Search the roofing company's uploaded documents (warranties, supplier catalogs, "
+            "company policies, installation specs). Returns the most relevant passages with "
+            "the document name and page. Use specific wording, e.g. 'decking replacement "
+            "extra charge' or 'workmanship warranty transfer'."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "query": {"type": "string", "description": "What to look for."},
+            },
+            "required": ["query"],
+        },
+    },
+    {
+        "name": "save_quote_notes",
+        "description": (
+            "Attach customer-facing notes to a saved quote. They appear on the quote and on "
+            "the printed estimate. Use only facts from search_documents results."
+        ),
+        "input_schema": {
+            "type": "object",
+            "properties": {
+                "quote_id": {"type": "string"},
+                "notes": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "2 to 5 short notes, one sentence each.",
+                },
+            },
+            "required": ["quote_id", "notes"],
         },
     },
 ]
@@ -231,8 +291,9 @@ def _run_tool(name: str, tool_input: dict) -> tuple[str, dict | None, str | None
         mid = tool_input.get("measurement_id")
         area_sqft = tool_input.get("roof_area_sqft")
         pitch = tool_input.get("pitch", "medium")
-        waste = tool_input.get("waste_factor", 0.12)
+        waste = tool_input.get("waste_factor")
         address = tool_input.get("property_address")
+        edges = {}
 
         # Pull measurements from DB when measurement_id is provided
         if mid:
@@ -240,8 +301,13 @@ def _run_tool(name: str, tool_input: dict) -> tuple[str, dict | None, str | None
             if row:
                 area_sqft = row["total_roof_area_sqft"]
                 pitch = row["pitch_normalized"]
-                waste = row.get("waste_factor", waste)
+                if waste is None:
+                    waste = row.get("waste_factor")
                 address = address or row.get("address")
+                edges = {
+                    k: row.get(k)
+                    for k in ("eave_length_ft", "rake_length_ft", "ridge_length_ft", "valley_length_ft")
+                }
 
         if not area_sqft:
             return json.dumps({"error": "roof_area_sqft is required when no measurement_id is provided"}), None, None, None
@@ -256,13 +322,14 @@ def _run_tool(name: str, tool_input: dict) -> tuple[str, dict | None, str | None
             layers_to_remove=tool_input.get("layers_to_remove", 1),
             waste_factor=waste,
             labor_rate_per_square=tool_input.get("labor_rate_per_square"),
-            disposal_cost=tool_input.get("disposal_cost", 0.0),
-            transport_cost=tool_input.get("transport_cost", 0.0),
-            permit_cost=tool_input.get("permit_cost", 0.0),
-            equipment_cost=tool_input.get("equipment_cost", 0.0),
-            overhead_pct=tool_input.get("overhead_pct", 0.15),
-            markup_pct=tool_input.get("markup_pct", 0.20),
+            disposal_cost=tool_input.get("disposal_cost"),
+            transport_cost=tool_input.get("transport_cost"),
+            permit_cost=tool_input.get("permit_cost"),
+            equipment_cost=tool_input.get("equipment_cost"),
+            overhead_pct=tool_input.get("overhead_pct"),
+            markup_pct=tool_input.get("markup_pct"),
             measurement_id=mid,
+            **edges,
         )
         breakdown = calculate(inputs)
         quote = Quote(
@@ -275,6 +342,19 @@ def _run_tool(name: str, tool_input: dict) -> tuple[str, dict | None, str | None
         qid = save_quote_direct(quote)
         result = {**breakdown.model_dump(), "quote_id": qid}
         return json.dumps(result), breakdown.model_dump(), qid, None
+
+    if name == "search_documents":
+        results = search_documents(tool_input["query"])
+        if not results:
+            return json.dumps({"results": [], "note": "No matching passages in the company's documents."}), None, None, None
+        return json.dumps({"results": results}), None, None, None
+
+    if name == "save_quote_notes":
+        notes = [n.strip() for n in tool_input.get("notes", []) if n and n.strip()][:6]
+        updated = update_quote_notes(tool_input["quote_id"], notes)
+        if updated is None:
+            return json.dumps({"error": "Quote not found"}), None, None, None
+        return json.dumps({"ok": True, "notes_saved": len(notes)}), updated, tool_input["quote_id"], None
 
     if name == "get_similar_quotes":
         results = get_similar_quotes(tool_input["roof_type"], tool_input["area_sqft"])
@@ -290,6 +370,8 @@ def chat(messages: list[ChatMessage]) -> tuple[str, dict | None, str | None, dic
     breakdown_result = None
     quote_id_result = None
     measurement_result = None
+    profile_text = profile_summary_for_agent(get_profile())
+    docs_text = titles_for_agent()
 
     while True:
         response = client.messages.create(
@@ -301,7 +383,12 @@ def chat(messages: list[ChatMessage]) -> tuple[str, dict | None, str | None, dic
                     "type": "text",
                     "text": SYSTEM_PROMPT,
                     "cache_control": {"type": "ephemeral"},
-                }
+                },
+                {
+                    "type": "text",
+                    "text": "Business profile (prices applied automatically):\n" + profile_text
+                            + "\n\nCompany documents available to search_documents:\n" + docs_text,
+                },
             ],
             tools=TOOLS,
             messages=api_messages,
